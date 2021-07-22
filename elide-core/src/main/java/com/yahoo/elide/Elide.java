@@ -14,6 +14,7 @@ import com.yahoo.elide.core.datastore.inmemory.InMemoryDataStore;
 import com.yahoo.elide.core.dictionary.Injector;
 import com.yahoo.elide.core.exceptions.BadRequestException;
 import com.yahoo.elide.core.exceptions.CustomErrorException;
+import com.yahoo.elide.core.exceptions.ErrorMapper;
 import com.yahoo.elide.core.exceptions.ErrorObjects;
 import com.yahoo.elide.core.exceptions.ForbiddenAccessException;
 import com.yahoo.elide.core.exceptions.HttpStatus;
@@ -81,6 +82,7 @@ public class Elide {
     @Getter private final AuditLogger auditLogger;
     @Getter private final DataStore dataStore;
     @Getter private final JsonApiMapper mapper;
+    @Getter private final ErrorMapper errorMapper;
     @Getter private final TransactionRegistry transactionRegistry;
     /**
      * Instantiates a new Elide instance.
@@ -93,6 +95,7 @@ public class Elide {
         this.dataStore = new InMemoryDataStore(elideSettings.getDataStore());
         this.dataStore.populateEntityDictionary(elideSettings.getDictionary());
         this.mapper = elideSettings.getMapper();
+        this.errorMapper = elideSettings.getErrorMapper();
         this.transactionRegistry = new TransactionRegistry();
 
         elideSettings.getSerdes().forEach((type, serde) -> registerCustomSerde(type, serde, type.getSimpleName()));
@@ -521,6 +524,20 @@ public class Elide {
                 log.debug("Request Thread interrupted.", e);
                 return buildErrorResponse(new TimeoutException(e), isVerbose);
             }
+
+            if (errorMapper != null && e instanceof Exception) {
+                log.trace("Attempting to map unknown exception of type {}", e.getClass());
+                CustomErrorException customizedError = errorMapper.map((Exception) e);
+
+                if (customizedError != null) {
+                    log.debug("Successfully mapped exception from type {} to {}",
+                            e.getClass(), customizedError.getClass());
+                    return buildErrorResponse(customizedError, isVerbose);
+                } else {
+                    log.debug("No error mapping present for {}", e.getClass());
+                }
+            }
+
             log.error("Error or exception uncaught by Elide", e);
             throw e;
         } finally {
